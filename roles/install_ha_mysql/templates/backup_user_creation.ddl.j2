@@ -1,0 +1,15 @@
+create database if not exists test_db DEFAULT CHARACTER SET utf8;
+
+CREATE USER 'backup'@'{{master[0]].ansible_hostname|lower}} IDENTIFIED BY '{{ mysql_backup_user_pass }}';
+GRANT SELECT, SHOW VIEW, RELOAD, REPLICATION CLIENT, EVENT, TRIGGER ON *.* TO 'backup'@'{{master[0]].ansible_hostname|lower}}';
+GRANT LOCK TABLES ON *.* TO 'backup'@'{{master[0]].ansible_hostname|lower}}';
+
+CREATE USER 'backup'@'{{slave[0]].ansible_hostname|lower}}' IDENTIFIED BY '{{ mysql_backup_user_pass }}';
+GRANT SELECT, SHOW VIEW, RELOAD, REPLICATION CLIENT, EVENT, TRIGGER ON *.* TO 'backup'@'{{slave[0]].ansible_hostname|lower}}';
+GRANT LOCK TABLES ON *.* TO 'backup'@'{{slave[0]].ansible_hostname|lower}}';
+
+
+DROP DATABASE if exists test;
+DELETE FROM mysql.user WHERE User='';
+UPDATE mysql.user SET Password=PASSWORD('{{mysql_password }}') WHERE User='root';
+FLUSH PRIVILEGES;

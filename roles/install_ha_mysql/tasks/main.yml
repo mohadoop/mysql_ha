@@ -1,0 +1,174 @@
+---
+
+  - name: Add Mysql Repo file to /etc/yum.repos.d
+    template:
+       src=mysql-community.repo.j2
+       dest=/etc/yum.repos.d/mysql-community.repo
+       owner=root
+       group=root
+       mode=0664
+
+  - name: Add Mysql Key for Repo file
+    template:
+       src=RPM-GPG-KEY-mysql.j2
+       dest=/etc/pki/rpm-gpg/RPM-GPG-KEY-mysql
+       owner=root
+       group=root
+       mode=0664
+
+  - name: Installing mysql Server
+    yum:
+      name=mysql-server
+      state=present
+
+  - name: Installing MySQL-python
+    yum:
+      name=MySQL-python  
+      state=installed
+
+  - name: Copy my.cnf to configure mysql for master
+    template:
+        src=master.my.cnf.j2
+        dest=/etc/my.cnf
+        owner=root
+        group=root
+        mode=600
+    run_once: true
+    delegate_to: "{{master[0].ansible_default_ipv4.address}}"
+
+  - name: Copy my.cnf to configure mysql for slave
+    template:
+        src=slave.my.cnf.j2
+        dest=/etc/my.cnf
+        owner=root
+        group=root
+        mode=600
+    run_once: true
+    delegate_to: "{{slave[0]].ansible_default_ipv4.address}}"
+
+  - name: Create mysql data directories
+    file:
+       path: /var/lib/mysql/ 
+       state: directory
+       owner: mysql
+       group: mysql
+       mode: 0750
+
+  - name: Create mysql redo log directories
+    file:
+      path: /var/lib/mysql/
+      state: directory
+      owner: mysql
+      group: mysql
+      mode: 0750
+
+  - name: Starting MYSQL database
+    service:
+        name=mysqld
+        state=started
+        enabled=yes
+ 
+  - name: Configuring mysqld to start at system restart
+    command: 
+       chkconfig mysqld on
+
+# Securing the master and slave databases
+
+  - name: Deplyoing backup_user_creation file to remote server
+    template:
+        src=backup_user_creation.ddl.j2
+        dest=/tmp/backup_user_creation.ddl
+    tags: ddl
+
+  - name: Deplyoing mysql databases and secure DB
+    mysql_db:
+        name=mysql
+        state=import
+        login_password=""
+        config_file=/etc/my.cnf
+        target=/tmp/backup_user_creation.ddl
+    register: mysql_command_result
+    ignore_errors: yes
+
+
+  - name: Removing DB permission file from remote host
+    template:
+        src=dummy.txt
+        dest=/tmp/backup_user_creation.ddl
+
+# Setting up replication service
+
+  - name: Create the replication users
+    mysql_user: 
+        login_user=root 
+        login_password={{mysql_password}}
+        name=replication
+        host="%" 
+        password={{ mysql_replication_pass }}
+        priv='*.*:REPLICATION SLAVE' 
+        state=present
+    when: inventory_hostname in master[0].ansible_default_ipv4.address
+    ignore_errors: true
+
+  - name: Get Master details and position
+    mysql_replication: 
+      mode=getmaster 
+      login_user=root 
+      login_password={{mysql_password}}
+    run_once: true
+    delegate_to: "{{master[0].ansible_default_ipv4.address}}"
+    register: master
+    tags: master
+    
+  - name: master variable details
+    set_fact:
+      master_file: "{{master.File}}"
+      master_position: "{{master.Position}}"
+    tags: master
+
+  - name: variable
+    debug: var=master
+    tags: master
+
+  - name: Stop Slave mysql server
+    mysql_replication: 
+      mode=stopslave 
+      login_user=root 
+      login_password={{mysql_password}}
+    run_once: true
+    delegate_to: "{{slave[0].ansible_default_ipv4.address}}"
+    tags: master
+
+  - name: Reset mysql slave server
+    mysql_replication: 
+      mode=resetslaveall 
+      login_user=root 
+      login_password={{mysql_password}}
+    run_once: true
+    delegate_to: "{{slave[0].ansible_default_ipv4.address}}"
+    tags: master
+
+  - name: Set Master Replication Server
+    mysql_replication: 
+      mode=changemaster 
+      login_user=root 
+      login_password={{mysql_password}}
+      master_host="{{master[0].ansible_default_ipv4.address }}"
+      master_log_file="{{master_file}}"
+      master_log_pos="{{master_position|int}}"
+      master_user="replication"
+      master_password="{{ mysql_replication_pass }}"
+    run_once: true
+    delegate_to:  "{{slave[0].ansible_default_ipv4.address}}"
+    tags: master
+
+  - name: Start the slave mysql server
+    mysql_replication: mode=startslave 
+      login_user=root 
+      login_password={{mysql_password}}
+    run_once: true
+    delegate_to: "{{slave[0].ansible_default_ipv4.address}}"
+    register: slave_start
+
+  - name: slave_start
+    debug: var=slave_start

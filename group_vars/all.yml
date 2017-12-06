@@ -1,0 +1,8 @@
+---
+# MYSQL installation details
+mysql_user : 'root'
+mysql_password : 'root_password'
+mysql_backup_user: backup                                     #Not used anywhere
+mysql_backup_user_pass: 'back_password'
+mysql_replication_user: replication                           #Not used anywhere
+mysql_replication_pass: 'replication_password'
