@@ -1,4 +1,4 @@
-# Install and enable MySQL(Community Edition)
+# Install and enable MySQL replicaiton(Community Edition)
 
 
 # Pre-requisite 
